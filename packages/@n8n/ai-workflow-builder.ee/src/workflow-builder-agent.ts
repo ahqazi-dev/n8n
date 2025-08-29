@@ -166,15 +166,26 @@ export class WorkflowBuilderAgent {
 			const plannerAgent = createWorkflowPlannerAgent(this.llmSimpleTask, this.parsedNodeTypes);
 
 			// Generate the workflow plan
-			const { plan, toolMessages } = await plannerAgent.plan(lastHumanMessage.content);
+			const plannerResult = await plannerAgent.plan(lastHumanMessage.content);
 
-			this.logger?.debug('Generated workflow plan: ' + JSON.stringify(plan, null, 2));
+			if ('plan' in plannerResult) {
+				const { plan, toolMessages } = plannerResult;
+				this.logger?.debug('Generated workflow plan: ' + JSON.stringify(plan, null, 2));
 
-			return {
-				workflowPlan: plan,
-				planStatus: 'pending' as const,
-				messages: [...messages, ...toolMessages],
-			};
+				return {
+					workflowPlan: plan,
+					planStatus: 'pending' as const,
+					messages: [...messages, ...toolMessages],
+				};
+			} else {
+				return {
+					messages: [
+						new AIMessage({
+							content: plannerResult.text,
+						}),
+					],
+				};
+			}
 		};
 
 		/**
@@ -235,6 +246,16 @@ export class WorkflowBuilderAgent {
 				planFeedback ?? undefined,
 			);
 
+			if ('text' in adjustedPlan) {
+				return {
+					messages: [
+						new AIMessage({
+							content: adjustedPlan.text,
+						}),
+					],
+				};
+			}
+
 			// Remove previous plan tool messages to avoid confusion
 			const filteredMessages = messages.map((m) => {
 				if (m instanceof ToolMessage && m.name === 'generate_workflow_plan') {
@@ -264,7 +285,7 @@ export class WorkflowBuilderAgent {
 		};
 
 		const shouldModifyState = (state: typeof WorkflowState.State) => {
-			const { messages, workflowContext } = state;
+			const { messages, workflowContext, planStatus } = state;
 			const lastHumanMessage = messages.findLast((m) => m instanceof HumanMessage)!; // There always should be at least one human message in the array
 
 			if (lastHumanMessage.content === '/compact') {
@@ -283,6 +304,11 @@ export class WorkflowBuilderAgent {
 
 			if (shouldAutoCompact(state)) {
 				return 'auto_compact_messages';
+			}
+
+			// If we don't have a plan yet, and the workflow is empty, create a plan
+			if (!planStatus && workflowContext?.currentWorkflow?.nodes?.length === 0) {
+				return 'create_plan';
 			}
 
 			return 'agent';
@@ -407,7 +433,11 @@ export class WorkflowBuilderAgent {
 			.addNode('review_plan', reviewPlan)
 			.addNode('adjust_plan', adjustPlan)
 			.addConditionalEdges('__start__', shouldModifyState)
-			.addEdge('create_plan', 'review_plan')
+			// .addEdge('create_plan', 'review_plan')
+			.addConditionalEdges('create_plan', (state) => {
+				// If a plan was created, move to review, otherwise back to planning
+				return state.workflowPlan ? 'review_plan' : END;
+			})
 			.addConditionalEdges('review_plan', (state) => {
 				// Route based on the plan status after review
 				return state.planStatus === 'approved' ? 'agent' : 'adjust_plan';
@@ -511,6 +541,7 @@ export class WorkflowBuilderAgent {
 		const interruptedTask = currentState.tasks.find(
 			(task) => task.interrupts && task.interrupts.length > 0,
 		);
+
 		if (interruptedTask) {
 			// We have a pending interrupt - likely a plan review
 
@@ -528,6 +559,7 @@ export class WorkflowBuilderAgent {
 
 			return await agent.stream(resumeCommand, streamConfig);
 		}
+
 		return await agent.stream(
 			{
 				messages: [new HumanMessage({ content: payload.message })],
