@@ -44,8 +44,8 @@ export const filterStatuses = (
 
 export class WhatsAppTrigger implements INodeType {
 	description: INodeTypeDescription = {
-		displayName: 'WhatsApp Trigger',
-		name: 'whatsAppTrigger',
+		displayName: 'google Trigger',
+		name: 'googleTrigger',
 		icon: 'file:whatsapp.svg',
 		group: ['trigger'],
 		version: 1,
@@ -58,7 +58,7 @@ export class WhatsAppTrigger implements INodeType {
 		outputs: [NodeConnectionTypes.Main],
 		credentials: [
 			{
-				name: 'whatsAppTriggerApi',
+				name: 'googleTriggerApi',
 				required: true,
 			},
 		],
@@ -80,7 +80,7 @@ export class WhatsAppTrigger implements INodeType {
 			{
 				displayName:
 					'Due to Facebook API limitations, you can use just one WhatsApp trigger for each Facebook App',
-				name: 'whatsAppNotice',
+				name: 'googleNotice',
 				type: 'notice',
 				default: '',
 			},
